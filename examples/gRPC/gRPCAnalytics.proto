@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package analytics;
+
+// The request payload containing the sensor metrics
+message MetricRequest {
+    string device_id = 1;
+    double reading_value = 2;
+    int64 timestamp = 3;
+}
+
+// The fast binary response from the server
+message MetricResponse {
+    bool success = 1;
+    string message = 2;
+}
+
+// The service defining the remote function
+service AnalyticsService {
+    rpc SendMetric (MetricRequest) returns (MetricResponse);
+}

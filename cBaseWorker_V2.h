@@ -127,6 +127,16 @@ public:
     return stopThread(duration_type{waitForStopTimeoutMilliSec});
   }
 
+  // Graceful stop that also blocks on the worker OS thread if the timeout expired while
+  // the worker was inside bounded in-flight work. Prevents callers from destroying a
+  // worker (and its native ML engines) while its thread is still executing a task.
+  void stopThreadAndJoin(duration_type waitForStopTimeout = kDefaultWaitTimeout) noexcept
+  {
+    if (stopThread(waitForStopTimeout))
+      return;
+    joinThread();
+  }
+
   void requestStop() noexcept
   {
     bool shouldTriggerStop = false;
