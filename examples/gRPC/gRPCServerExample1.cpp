@@ -1,6 +1,10 @@
+#include <atomic>
+#include <chrono>
+#include <csignal>
 #include <iostream>
 #include <memory>
 #include <string>
+#include <thread>
 #include <grpcpp/grpcpp.h>
 #include "gRPCAnalytics.grpc.pb.h" // Generated header
 
@@ -18,6 +22,7 @@ class AnalyticsServiceImpl final : public AnalyticsService::Service
     Status SendMetric(ServerContext *context, const MetricRequest *request,
                       MetricResponse *reply) override
     {
+        (void)context;
 
         // Performance Note: Keep this logic brief to maintain low latency
         std::cout << "Received metric from: " << request->device_id()
@@ -31,23 +36,53 @@ class AnalyticsServiceImpl final : public AnalyticsService::Service
     }
 };
 
-void RunServer()
+namespace
 {
+    std::atomic<bool> g_shutdownRequested{false};
+}
+
+void SignalHandler(int signal)
+{
+    if (signal == SIGINT || signal == SIGTERM)
+    {
+        g_shutdownRequested.store(true, std::memory_order_release);
+    }
+}
+
+int main()
+{
+    std::signal(SIGINT, SignalHandler);
+    std::signal(SIGTERM, SignalHandler);
+
     std::string server_address("0.0.0.0:50051");
     AnalyticsServiceImpl service;
 
     ServerBuilder builder;
     // Listen on the port without authentication for local testing
-    builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
+    int selected_port = 0;
+    builder.AddListeningPort(server_address, grpc::InsecureServerCredentials(), &selected_port);
     builder.RegisterService(&service);
-
     std::unique_ptr<Server> server(builder.BuildAndStart());
-    std::cout << "High-performance Server listening on " << server_address << "\n";
-    server->Wait();
-}
+    if (!server)
+    {
+        std::cerr << "Failed to bind " << server_address << "\n";
+        return EXIT_FAILURE;
+    }
+    std::cout << "High-performance Server listening on port " << selected_port << "\n";
 
-int main()
-{
-    RunServer();
+    // Server::Wait() blocks indefinitely, so drive it from a helper thread and
+    // let the main thread react to Ctrl+C / SIGTERM.
+    std::thread waiter([&server]() { server->Wait(); });
+
+    while (!g_shutdownRequested.load(std::memory_order_acquire))
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+
+    std::cout << "Shutdown signal received.\n";
+    server->Shutdown();
+    waiter.join();
+
+    std::cout << "Sync server stopped cleanly.\n";
     return 0;
 }

@@ -28,13 +28,14 @@ public:
         return &analytics::AnalyticsService::AsyncService::RequestSendMetric;
     }
 
-    // Implement your core business logic routine when an event arrives
-    void OnExecuteRpc(grpc::ServerContext &ctx,
-                      const analytics::MetricRequest &request,
-                      analytics::MetricResponse &reply,
-                      grpc::ServerAsyncResponseWriter<analytics::MetricResponse> &responder,
-                      void *tag)
+    // Implement your core business logic routine when an event arrives.
+    // The engine owns the response writer: it writes the reply and finishes
+    // the RPC for you based on the Status you return.
+    grpc::Status OnExecuteRpc(grpc::ServerContext &ctx,
+                              const analytics::MetricRequest &request,
+                              analytics::MetricResponse &reply) override
     {
+        (void)ctx;
 
         // Quick extraction of incoming binary payload fields
         std::cout << "[" << name() << "] Received processing payload from Device: "
@@ -44,8 +45,7 @@ public:
         reply.set_success(true);
         reply.set_message("Payload processed successfully via CRTP abstraction.");
 
-        // Finalize the connection handling
-        responder.Finish(reply, grpc::Status::OK, tag);
+        return grpc::Status::OK;
     }
 };
 
@@ -85,18 +85,19 @@ int main()
         return EXIT_FAILURE;
     }
 
-    std::cout << "Engine successfully running. Press Ctrl+C to terminate cleanly.\n";
+    std::cout << "Engine successfully running. Bound on port "
+              << workerService->boundPort()
+              << ". Press Ctrl+C to terminate cleanly.\n";
 
     // Standard application event orchestrator loop
     while (!g_shutdownRequested.load(std::memory_order_acquire))
     {
         // Monitor worker lifecycle sanity health metrics
-        auto lastHb = workerService->lastHeartbeat();
         auto hbPeriod = workerService->heartBeatPeriod().count();
 
         std::cout << "[Monitor] Engine Thread State: "
                   << static_cast<int>(workerService->getState())
-                  << " | Last Period: " << hbPeriod << "ms\n";
+                  << " | Heartbeat period: " << hbPeriod << "ms\n";
 
         // Check if internal background panics or crashes happened inside run() execution paths
         if (workerService->lastUnhandledException())

@@ -27,6 +27,30 @@ This folder contains runnable sample programs for the supported ThreadComponent 
 - `httpsServerTest_V2.cpp`
   - HTTPS server example using `cHTTPSServer_V2`
 
+## gRPC Examples
+
+`gRPC/` contains gRPC servers and a client built around the generated
+`gRPCAnalytics.proto` service (`analytics.AnalyticsService`). They are built
+automatically when a gRPC + Protobuf toolchain is detected; `protoc` and
+`grpc_cpp_plugin` generate the `.pb.cc`/`.grpc.pb.cc` sources at build time.
+The folder can also be configured and built standalone.
+
+- `gRPCGenericServerExample.cpp` -> `generic_server`
+  - CRTP engine `cGenericGrpcWorker`; a derived worker only supplies `GetRpcBinding()`
+    and `OnExecuteRpc()`. The engine handles the completion queue, heartbeat,
+    graceful shutdown, and exception-safe RPC finishing.
+- `gRPCWorkerServerExample.cpp` -> `worker_server`
+  - concrete `cGrpcServerWorker` specialization of the generic engine
+- `gRPCAsyServerExample1.cpp` -> `async_server`
+  - manual, framework-free asynchronous server reference implementation
+- `gRPCServerExample1.cpp` -> `grpc_server`
+  - classic synchronous `Service::SendMetric` implementation
+- `gRPCClientExample1.cpp` -> `grpc_client`
+  - blocking client with connection-ready wait and per-call deadline
+
+All servers listen on `0.0.0.0:50051` and respond to the client on
+`localhost:50051`. Each server handles SIGINT/SIGTERM for a clean shutdown.
+
 ## Legacy Reference Files
 
 These files are intentionally kept as reference material but are not part of the default CMake build:

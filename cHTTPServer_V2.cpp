@@ -168,19 +168,42 @@ void cHTTPServer_V2::run()
 
 void cHTTPServer_V2::stopTriggered()
 {
-  try
+  auto io = ioContext();
+  if (!io)
   {
-    m_server.stop();
-  }
-  catch (...)
-  {
+    try
+    {
+      m_server.stop();
+    }
+    catch (...)
+    {
+    }
+    return;
   }
 
-  auto io = ioContext();
-  if (io)
-  {
-    io->stop();
-  }
+  // Run the stop sequence on the io_context thread so socket teardown cannot
+  // race with in-flight handlers. Simple-Web-Server's stop() only stops the
+  // io_service when it owns it internally (which is not the case here), so
+  // closing sockets from a foreign thread races with running handlers.
+  asio::post(
+      *io,
+      [this]() noexcept
+      {
+        try
+        {
+          m_server.stop();
+        }
+        catch (...)
+        {
+        }
+      });
+
+  asio::post(
+      *io,
+      [stopContext = io]() noexcept
+      {
+        stopContext->stop();
+      });
 
   resolveStartIfPending(false, 0U, "HTTP server stop requested");
 }

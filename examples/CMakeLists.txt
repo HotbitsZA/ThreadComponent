@@ -30,3 +30,16 @@ add_threadcomponent_http_example("httpServerTest" "httpServerTest.cpp" threadcom
 add_threadcomponent_http_example("httpServerTest_V2" "httpServerTest_V2.cpp" threadcomponent_http_server_v2)
 add_threadcomponent_https_example("httpsServerTest" "httpsServerTest.cpp" threadcomponent_https_server)
 add_threadcomponent_https_example("httpsServerTest_V2" "httpsServerTest_V2.cpp" threadcomponent_https_server_v2)
+
+# Optional gRPC examples: only pulled in when a gRPC toolchain is available so
+# machines without gRPC installed can still build the rest of the project.
+option(THREADCOMPONENT_BUILD_GRPC_EXAMPLES "Build gRPC example executables" ON)
+if(THREADCOMPONENT_BUILD_GRPC_EXAMPLES)
+  find_package(gRPC CONFIG QUIET)
+  find_package(protobuf CONFIG QUIET)
+  if(gRPC_FOUND AND protobuf_FOUND)
+    add_subdirectory(gRPC)
+  else()
+    message(STATUS "gRPC/Protobuf not found - skipping ThreadComponent gRPC examples")
+  endif()
+endif()

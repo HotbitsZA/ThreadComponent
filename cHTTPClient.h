@@ -40,7 +40,7 @@ public:
     std::string bearerToken;
     std::string caInfoPath;
     std::chrono::milliseconds connectTimeout{10000};
-    std::chrono::milliseconds timeout{30000};
+    std::chrono::milliseconds timeout{180000};
     long maxRedirects{10};
     bool followRedirects{true};
     bool verifyPeer{true};

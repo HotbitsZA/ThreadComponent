@@ -1,4 +1,7 @@
+#include <atomic>
 #include <cassert>
+#include <chrono>
+#include <csignal>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -15,19 +18,16 @@ using grpc::ServerCompletionQueue;
 using grpc::ServerContext;
 using grpc::Status;
 
+// Plain, minimal reference implementation of an async gRPC server. It exists
+// to show exactly what the engine in cGenericGrpcWorker.h abstracts away. See
+// gRPCGenericServerExample.cpp / gRPCWorkerServerExample.cpp for the framework
+// driven versions.
 class AsyncServer final
 {
 public:
     ~AsyncServer()
     {
-        if (server_)
-        {
-            server_->Shutdown();
-        }
-        if (cq_)
-        {
-            cq_->Shutdown();
-        }
+        Shutdown();
     }
 
     void Run()
@@ -41,10 +41,26 @@ public:
         // Request a completion queue for the asynchronous event loop
         cq_ = builder.AddCompletionQueue();
         server_ = builder.BuildAndStart();
+        if (!server_)
+        {
+            throw std::runtime_error("OS failed to bind " + server_address);
+        }
         std::cout << "Asynchronous Server listening on " << server_address << "\n";
 
-        // Start the event loop thread
         HandleRpcs();
+    }
+
+    // Graceful stop: stops new connections, then unblocks + drains the loop.
+    void Shutdown()
+    {
+        if (server_)
+        {
+            server_->Shutdown();
+        }
+        if (cq_)
+        {
+            cq_->Shutdown();
+        }
     }
 
 private:
@@ -72,7 +88,8 @@ private:
                 new CallData(service_, cq_);
 
                 // Execute business logic (Keep it fast!)
-                std::cout << "Async received: " << request_.device_id() << "\n";
+                std::cout << "Async received: " << request_.device_id()
+                          << " value=" << request_.reading_value() << "\n";
                 reply_.set_success(true);
                 reply_.set_message("Async processing complete.");
 
@@ -107,13 +124,19 @@ private:
     {
         // Spawn the first initial call handler
         new CallData(&service_, cq_.get());
-        void *tag; // Identifies which specific request event ready
+        void *tag; // Identifies which specific request event is ready
         bool ok;
 
-        // Non-blocking event loop engine
+        // Blocking event loop engine
         while (cq_->Next(&tag, &ok))
         {
-            assert(ok);
+            if (!ok)
+            {
+                // Request was cancelled or the server shut down mid-flight:
+                // reclaim the tag (it is delivered exactly once) and continue.
+                delete static_cast<CallData *>(tag);
+                continue;
+            }
             static_cast<CallData *>(tag)->Proceed();
         }
     }
@@ -123,9 +146,39 @@ private:
     std::unique_ptr<Server> server_;
 };
 
+namespace
+{
+    std::atomic<bool> g_shutdownRequested{false};
+}
+
+void SignalHandler(int signal)
+{
+    if (signal == SIGINT || signal == SIGTERM)
+    {
+        g_shutdownRequested.store(true, std::memory_order_release);
+    }
+}
+
 int main()
 {
+    std::signal(SIGINT, SignalHandler);
+    std::signal(SIGTERM, SignalHandler);
+
     AsyncServer server;
-    server.Run();
+
+    // Run the blocking event loop on its own thread so the main thread can
+    // react to termination signals and orchestrate a graceful shutdown.
+    std::thread eventLoop([&server]() { server.Run(); });
+
+    while (!g_shutdownRequested.load(std::memory_order_acquire))
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+
+    std::cout << "Shutdown signal received.\n";
+    server.Shutdown(); // unblocks eventLoop via the completion queue
+    eventLoop.join();
+
+    std::cout << "Async server stopped cleanly.\n";
     return 0;
 }
